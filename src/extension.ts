@@ -1,0 +1,42 @@
+import * as vscode from "vscode";
+import { Agent } from "./agent";
+import { GitWatcher } from "./gitWatcher";
+
+/**
+ * This method is called when your extension is activated.
+ * Activation occurs on VS Code startup (onStartupFinished event).
+ */
+export function activate(context: vscode.ExtensionContext): void {
+  const outputChannel = vscode.window.createOutputChannel(
+    "Continuous AI Reviewer"
+  );
+
+  outputChannel.appendLine("Continuous AI Reviewer extension activated");
+
+  // Get workspace root
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders || workspaceFolders.length === 0) {
+    outputChannel.appendLine(
+      "No workspace folder open. Extension will remain idle."
+    );
+    context.subscriptions.push(outputChannel);
+    return;
+  }
+
+  const workspaceRoot = workspaceFolders[0].uri.fsPath;
+  outputChannel.appendLine("Using workspace: " + workspaceRoot);
+
+  // Create Agent and GitWatcher instances
+  const agent = new Agent(workspaceRoot, outputChannel);
+  const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
+
+  // Register disposables for cleanup
+  context.subscriptions.push(gitWatcher, outputChannel);
+
+  outputChannel.appendLine("Git watcher initialized and polling started");
+}
+
+/**
+ * This method is called when your extension is deactivated.
+ */
+export function deactivate(): void {}
