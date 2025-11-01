@@ -113,6 +113,8 @@ export async function activate(
           vendor: currentVendor,
         });
 
+        console.log(availableModels);
+
         if (availableModels.length === 0) {
           vscode.window.showWarningMessage(
             "No language models available. Please ensure GitHub Copilot is installed and you are signed in."
@@ -151,7 +153,12 @@ export async function activate(
             });
           }
         }
-
+        const nonePremiumModels = [
+          "gpt-5-mini",
+          "gpt-4.1",
+          "gpt-4o",
+          "grok-code",
+        ];
         // Build quick pick options from available models
         const modelOptions = Array.from(modelFamilyMap.values()).map(
           (model) => {
@@ -159,21 +166,7 @@ export async function activate(
             const icon = isCurrent ? "$(check)" : "$(circle-outline)";
 
             // Determine if model is premium (o1 models count for premium)
-            const isPremium =
-              model.family.includes("o1-preview") ||
-              model.family.includes("o1-mini");
-
-            // Determine icon based on model family
-            let familyIcon = "$(robot)";
-            if (model.family.includes("gpt-4")) {
-              familyIcon = "$(star)";
-            } else if (model.family.includes("gpt-3")) {
-              familyIcon = "$(zap)";
-            } else if (model.family.includes("o1")) {
-              familyIcon = "$(beaker)";
-            } else if (model.family.includes("mini")) {
-              familyIcon = "$(run)";
-            }
+            const isPremium = !nonePremiumModels.includes(model.family);
 
             // Add kind for grouping
             const kind = isPremium
@@ -181,7 +174,7 @@ export async function activate(
               : vscode.QuickPickItemKind.Default;
 
             return {
-              label: `${icon} ${familyIcon} ${model.family}`,
+              label: `${icon} ${model.family}`,
               description: `v${
                 model.version
               } • ${model.maxInputTokens.toLocaleString()} tokens${
@@ -262,13 +255,83 @@ export async function activate(
     }
   );
 
+  // Register command to manually generate a review for the last commit
+  const generateReviewNowCommand = "continuous-ai-reviewer.generateReviewNow";
+  const generateReviewNowDisposable = vscode.commands.registerCommand(
+    generateReviewNowCommand,
+    async () => {
+      try {
+        outputChannel.appendLine(
+          "[Extension] Manual review generation requested"
+        );
+        outputChannel.show(true); // Show the output channel
+
+        // Get HEAD and previous commit
+        const cp = require("child_process");
+        const { promisify } = require("util");
+        const exec = promisify(cp.exec);
+
+        const { stdout: currentHash } = await exec("git rev-parse HEAD", {
+          cwd: workspaceRoot,
+        });
+        const current = currentHash.trim();
+
+        const { stdout: previousHash } = await exec("git rev-parse HEAD~1", {
+          cwd: workspaceRoot,
+        });
+        const previous = previousHash.trim();
+
+        outputChannel.appendLine(
+          `[Extension] Generating review for: ${previous.substring(
+            0,
+            7
+          )} → ${current.substring(0, 7)}`
+        );
+
+        // Get changed files
+        const { stdout: diffOutput } = await exec(
+          `git diff --name-only ${previous} ${current}`,
+          { cwd: workspaceRoot }
+        );
+        const files = diffOutput
+          .trim()
+          .split("\n")
+          .filter((f: string) => f.length > 0);
+
+        outputChannel.appendLine(
+          `[Extension] Changed files: ${files.length} file(s)`
+        );
+
+        if (files.length === 0) {
+          vscode.window.showWarningMessage(
+            "No files changed in the last commit"
+          );
+          return;
+        }
+
+        // Call agent to process changes
+        vscode.window.showInformationMessage(
+          "Generating code review... Check the output channel for progress."
+        );
+        await agent.processChanges(files, previous, current);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        outputChannel.appendLine(`[Extension] Error: ${errorMsg}`);
+        vscode.window.showErrorMessage(
+          `Failed to generate review: ${errorMsg}`
+        );
+      }
+    }
+  );
+
   // Register disposables for cleanup
   context.subscriptions.push(
     gitWatcher,
     outputChannel,
     openReviewDisposable,
     cRvDisposable,
-    selectModelDisposable
+    selectModelDisposable,
+    generateReviewNowDisposable
   );
 
   outputChannel.appendLine("Git watcher initialized and polling started");

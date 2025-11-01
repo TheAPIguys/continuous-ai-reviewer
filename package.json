@@ -29,6 +29,11 @@
         "command": "continuous-ai-reviewer.selectModel",
         "title": "Continuous AI Reviewer: Select AI Model",
         "category": "Continuous AI Reviewer"
+      },
+      {
+        "command": "continuous-ai-reviewer.generateReviewNow",
+        "title": "Continuous AI Reviewer: Generate Review Now",
+        "category": "Continuous AI Reviewer"
       }
     ],
     "configuration": {

@@ -99,41 +99,13 @@ export class Agent {
           newHash
       );
 
-      // Generate review content — prefer pluggable provider if available
-      let reviewContent: string;
-      // Prefer provider-based generation. If a provider exists, use it. If it
-      // fails, fall back to generateReviewContent which itself will attempt to
-      // use the Copilot extension if available.
-      if (this.provider) {
-        try {
-          reviewContent = await this.provider.generateReview(
-            files,
-            oldHash,
-            newHash
-          );
-        } catch (err) {
-          this.outputChannel.appendLine(
-            "[Agent] Provider failed, falling back to local generator: " +
-              (err instanceof Error ? err.message : String(err))
-          );
-          reviewContent = await this.generateReviewContent(
-            files,
-            oldHash,
-            newHash
-          );
-        }
-      } else {
-        reviewContent = await this.generateReviewContent(
-          files,
-          oldHash,
-          newHash
-        );
-      }
-
-      // Previously, we would call a fallback API provider when the
-      // Copilot provider returned a fallback prompt. That path has been
-      // removed—this extension now relies only on the Copilot/chat
-      // extension (or the local stub) to produce the review.
+      // Generate review content using the new Language Model API
+      // We no longer use the provider pattern since vscode.lm is the official API
+      const reviewContent = await this.generateReviewContent(
+        files,
+        oldHash,
+        newHash
+      );
 
       // Write review file
       await this.writeReviewFile(reviewContent);
@@ -187,27 +159,6 @@ export class Agent {
     oldHash: string,
     newHash: string
   ): Promise<string> {
-    // If a Copilot provider is present, try to use it first. This allows the
-    // local fallback path to still leverage the Copilot extension when
-    // available even if the primary provider call failed earlier.
-    if (this.provider) {
-      try {
-        const fromProvider = await this.provider.generateReview(
-          files,
-          oldHash,
-          newHash
-        );
-        if (fromProvider && fromProvider.trim().length > 0) {
-          return fromProvider;
-        }
-      } catch (e) {
-        this.outputChannel.appendLine(
-          "[Agent] generateReviewContent: provider.generateReview failed: " +
-            (e instanceof Error ? e.message : String(e))
-        );
-      }
-    }
-
     // Try to use VS Code Language Model API (vscode.lm)
     try {
       // Dynamically import vscode module for runtime access
@@ -293,6 +244,10 @@ export class Agent {
       return reviewContent;
     } catch (error) {
       // Handle Language Model errors
+      this.outputChannel.appendLine(
+        "[Agent] Exception caught in generateReviewContent"
+      );
+
       if (error && (error as any).constructor.name === "LanguageModelError") {
         const lmError = error as any;
         this.outputChannel.appendLine(
@@ -310,15 +265,25 @@ export class Agent {
           this.outputChannel.appendLine(
             "[Agent] User has not given consent to use Language Models"
           );
+          this.notifier?.showErrorMessage(
+            "Please grant permission to use GitHub Copilot for code reviews"
+          );
         } else if (lmError.message?.includes("quota")) {
           this.outputChannel.appendLine(
             "[Agent] Language Model quota exceeded"
           );
+          this.notifier?.showErrorMessage(
+            "Language model quota exceeded. Try again later."
+          );
         }
+      } else if (error instanceof Error) {
+        this.outputChannel.appendLine(
+          "[Agent] Error using Language Model API: " + error.message
+        );
+        this.outputChannel.appendLine("[Agent] Stack: " + error.stack);
       } else {
         this.outputChannel.appendLine(
-          "[Agent] Error using Language Model API: " +
-            (error instanceof Error ? error.message : String(error))
+          "[Agent] Unknown error: " + String(error)
         );
       }
 
