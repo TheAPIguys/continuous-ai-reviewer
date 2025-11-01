@@ -28,6 +28,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Setup virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
       - name: Run type checking
         run: pnpm run check-types
 
@@ -35,6 +40,7 @@ jobs:
         run: pnpm run lint
 
       - name: Run tests
-        run: pnpm test
+        run: xvfb-run -a pnpm test
         env:
           CI: true
+        timeout-minutes: 10

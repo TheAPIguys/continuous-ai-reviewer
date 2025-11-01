@@ -59,8 +59,8 @@ pnpm run package
 
 - **GitHub Actions**: `.github/workflows/ci.yml` runs on every push/PR to master
 - **Triggers**: Push to master branch and pull requests targeting master
-- **Steps**: Setup pnpm → Setup Node.js → Install deps → Type check → Lint → Run tests
-- **Environment**: Ubuntu with Node.js 24, pnpm v10, pnpm caching enabled
+- **Steps**: Setup pnpm → Setup Node.js → Install deps → Setup virtual display → Type check → Lint → Run tests
+- **Environment**: Ubuntu with Node.js 24, pnpm v10, xvfb for headless VS Code testing
 
 ## Core Components Architecture
 
