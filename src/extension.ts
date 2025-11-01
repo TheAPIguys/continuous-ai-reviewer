@@ -3,7 +3,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
-import { tryCreateCopilotProvider } from "./providers/copilotExtensionProvider";
 
 /**
  * This method is called when your extension is activated.
@@ -32,28 +31,8 @@ export async function activate(
   outputChannel.appendLine("Using workspace: " + workspaceRoot);
 
   // Create Agent and GitWatcher instances
-  // Try to detect/activate a Copilot provider (async)
-  let provider = undefined;
-  try {
-    provider = await tryCreateCopilotProvider(workspaceRoot, outputChannel);
-  } catch (e) {
-    outputChannel.appendLine(
-      "[Extension] Error while creating Copilot provider: " +
-        (e instanceof Error ? e.message : String(e))
-    );
-  }
-
-  if (provider) {
-    vscode.window.showInformationMessage(
-      "Copilot extension detected and will be used for reviews"
-    );
-  } else {
-    vscode.window.showInformationMessage(
-      "Copilot extension not available — using local review generator"
-    );
-  }
-
-  const agent = new Agent(workspaceRoot, outputChannel, provider, undefined);
+  // No longer need provider since we use vscode.lm API directly
+  const agent = new Agent(workspaceRoot, outputChannel, undefined);
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
   // Register command to open the generated review file from the Command Palette

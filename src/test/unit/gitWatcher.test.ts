@@ -8,8 +8,8 @@ class DummyOutputChannel {
   }
 }
 
-describe("GitWatcher (unit)", function () {
-  it("forwards changed files to Agent.processChanges", async function () {
+suite("GitWatcher (unit)", function () {
+  test("forwards changed files to Agent.processChanges", async function () {
     // Create a dummy agent that records the last call
     const dummyAgent: any = {
       last: null,

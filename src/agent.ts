@@ -34,18 +34,15 @@ export class Agent {
     | vscode.OutputChannel
     | { appendLine(line: string): void };
   private workspaceRoot: string;
-  private provider?: IReviewProvider;
   private notifier?: Notifier;
 
   constructor(
     workspaceRoot: string,
     outputChannel: vscode.OutputChannel | { appendLine(line: string): void },
-    provider?: IReviewProvider,
     notifier?: Notifier
   ) {
     this.workspaceRoot = workspaceRoot;
     this.outputChannel = outputChannel;
-    this.provider = provider;
     this.notifier = notifier;
 
     // If no notifier was provided (runtime in VS Code), lazily require vscode

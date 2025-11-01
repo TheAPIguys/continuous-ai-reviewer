@@ -23,24 +23,19 @@ class DummyNotifier {
   }
 }
 
-describe("Agent", function () {
+suite("Agent", function () {
   const tmpDir = path.join(os.tmpdir(), `car-agent-test-${Date.now()}`);
   let output: DummyOutputChannel;
   let agent: Agent;
 
-  before(function () {
+  suiteSetup(function () {
     fs.mkdirSync(tmpDir, { recursive: true });
     output = new DummyOutputChannel();
     const notifier = new DummyNotifier();
-    agent = new Agent(
-      tmpDir,
-      output as unknown as any,
-      undefined,
-      notifier as any
-    );
+    agent = new Agent(tmpDir, output as unknown as any, notifier as any);
   });
 
-  after(function () {
+  suiteTeardown(function () {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (e) {
@@ -48,7 +43,7 @@ describe("Agent", function () {
     }
   });
 
-  it("writes a review file containing commit range and changed files", async function () {
+  test("writes a review file containing commit range and changed files", async function () {
     const files = ["foo.txt", "lib/bar.ts"];
     await agent.processChanges(files, "oldhash", "newhash");
 

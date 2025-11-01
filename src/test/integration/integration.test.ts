@@ -5,11 +5,11 @@ import * as os from "os";
 import { execSync } from "child_process";
 import { Agent } from "../../agent";
 
-describe("integration: Agent writes review for git changes", function () {
+suite("integration: Agent writes review for git changes", function () {
   // git operations and file writes may take a moment
   this.timeout(10000);
 
-  it("creates review/review.md after a commit change", async () => {
+  test("creates review/review.md after a commit change", async () => {
     // Create temp workspace
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "car-integ-"));
 
@@ -56,7 +56,7 @@ describe("integration: Agent writes review for git changes", function () {
       executeCommand: async () => undefined,
     } as any;
 
-    const agent = new Agent(tmp, outputChannel, undefined, notifier);
+    const agent = new Agent(tmp, outputChannel, notifier);
 
     // Call processChanges which should write review/review.md
     await agent.processChanges(changed, oldHash, newHash);
