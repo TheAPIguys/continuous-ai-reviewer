@@ -13,7 +13,20 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
-  "contributes": {},
+  "contributes": {
+    "commands": [
+      {
+        "command": "continuous-ai-reviewer.openReview",
+        "title": "Continuous AI Reviewer: Open review file",
+        "category": "Continuous AI Reviewer"
+      },
+      {
+        "command": "continuous-ai-reviewer.cRV",
+        "title": "cRV",
+        "category": "Continuous AI Reviewer"
+      }
+    ]
+  },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
     "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
@@ -30,18 +43,18 @@
     "unit": "mocha -r ts-node/register \"src/test/unit/**/*.test.ts\""
   },
   "devDependencies": {
-    "@types/vscode": "^1.105.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@typescript-eslint/eslint-plugin": "^8.45.0",
-    "@typescript-eslint/parser": "^8.45.0",
-    "eslint": "^9.36.0",
-    "esbuild": "^0.25.10",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.9.3",
+    "@types/node": "~22.18.13",
+    "@types/vscode": "^1.105.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
-    "mocha": "^10.2.0",
-    "ts-node": "^10.9.1"
+    "esbuild": "^0.25.11",
+    "eslint": "^9.39.0",
+    "mocha": "^10.8.2",
+    "npm-run-all": "^4.1.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

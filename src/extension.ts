@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
 
@@ -30,8 +32,48 @@ export function activate(context: vscode.ExtensionContext): void {
   const agent = new Agent(workspaceRoot, outputChannel);
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
+  // Register command to open the generated review file from the Command Palette
+  const openReviewCommand = "continuous-ai-reviewer.openReview";
+  const openReviewDisposable = vscode.commands.registerCommand(
+    openReviewCommand,
+    async () => {
+      const reviewFile = path.join(workspaceRoot, "review", "review.md");
+      if (!fs.existsSync(reviewFile)) {
+        vscode.window.showInformationMessage(
+          "No review file found. Generate a review first."
+        );
+        return;
+      }
+
+      try {
+        const doc = await vscode.workspace.openTextDocument(reviewFile);
+        await vscode.window.showTextDocument(doc, { preview: false });
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          "Failed to open review file: " +
+            (err instanceof Error ? err.message : String(err))
+        );
+      }
+    }
+  );
+
+  // Alias command with a very short title (cRV) so users can type the short text quickly
+  const cRvCommand = "continuous-ai-reviewer.cRV";
+  const cRvDisposable = vscode.commands.registerCommand(
+    cRvCommand,
+    async () => {
+      // Execute the main openReview command so behavior remains centralized
+      await vscode.commands.executeCommand(openReviewCommand);
+    }
+  );
+
   // Register disposables for cleanup
-  context.subscriptions.push(gitWatcher, outputChannel);
+  context.subscriptions.push(
+    gitWatcher,
+    outputChannel,
+    openReviewDisposable,
+    cRvDisposable
+  );
 
   outputChannel.appendLine("Git watcher initialized and polling started");
 }
