@@ -1,7 +1,17 @@
-import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { IReviewProvider } from "./providers/IReviewProvider";
+
+// Notifier is an abstraction over VS Code's messaging/commands so unit tests
+// don't need to require the `vscode` module at load time.
+export interface Notifier {
+  showInformationMessage(
+    message: string,
+    ...actions: string[]
+  ): Promise<string | undefined>;
+  showErrorMessage(message: string): void;
+  executeCommand(command: string, ...args: any[]): Promise<any>;
+}
 
 /**
  * Agent handles the processing of changed files and generation of review files.
@@ -12,18 +22,48 @@ import { IReviewProvider } from "./providers/IReviewProvider";
  * Future: Will integrate with Copilot Agent endpoint to generate AI-powered reviews.
  */
 export class Agent {
-  private outputChannel: vscode.OutputChannel;
+  private outputChannel: any;
   private workspaceRoot: string;
   private provider?: IReviewProvider;
+  private notifier?: Notifier;
+  private fallbackProvider?: IReviewProvider;
 
   constructor(
     workspaceRoot: string,
-    outputChannel: vscode.OutputChannel,
-    provider?: IReviewProvider
+    outputChannel: any,
+    provider?: IReviewProvider,
+    notifier?: Notifier,
+    fallbackProvider?: IReviewProvider
   ) {
     this.workspaceRoot = workspaceRoot;
     this.outputChannel = outputChannel;
     this.provider = provider;
+    this.notifier = notifier;
+    this.fallbackProvider = fallbackProvider;
+
+    // If no notifier was provided (runtime in VS Code), lazily require vscode
+    if (!this.notifier) {
+      try {
+        // require at runtime so unit tests that run outside VS Code don't fail
+        // when resolving the 'vscode' module.
+        const vscode = require("vscode");
+        this.notifier = {
+          showInformationMessage: (msg: string, ...actions: string[]) =>
+            vscode.window.showInformationMessage(msg, ...actions),
+          showErrorMessage: (msg: string) =>
+            vscode.window.showErrorMessage(msg),
+          executeCommand: (cmd: string, ...args: any[]) =>
+            vscode.commands.executeCommand(cmd, ...args),
+        };
+      } catch (e) {
+        // No-op notifier when running in unit test environment
+        this.notifier = {
+          showInformationMessage: async () => undefined,
+          showErrorMessage: () => undefined,
+          executeCommand: async () => undefined,
+        };
+      }
+    }
   }
 
   /**
@@ -48,6 +88,9 @@ export class Agent {
 
       // Generate review content — prefer pluggable provider if available
       let reviewContent: string;
+      // Prefer provider-based generation. If a provider exists, use it. If it
+      // fails, fall back to generateReviewContent which itself will attempt to
+      // use the Copilot extension if available.
       if (this.provider) {
         try {
           reviewContent = await this.provider.generateReview(
@@ -60,10 +103,45 @@ export class Agent {
             "[Agent] Provider failed, falling back to local generator: " +
               (err instanceof Error ? err.message : String(err))
           );
-          reviewContent = this.generateReviewContent(files, oldHash, newHash);
+          reviewContent = await this.generateReviewContent(
+            files,
+            oldHash,
+            newHash
+          );
         }
       } else {
-        reviewContent = this.generateReviewContent(files, oldHash, newHash);
+        reviewContent = await this.generateReviewContent(
+          files,
+          oldHash,
+          newHash
+        );
+      }
+
+      // If provider returned a fallback prompt (e.g., Copilot fallback),
+      // and a fallbackProvider (API) is available, use it to generate a real review.
+      if (
+        this.fallbackProvider &&
+        typeof reviewContent === "string" &&
+        reviewContent.startsWith("# Copilot (fallback) Review")
+      ) {
+        try {
+          this.outputChannel.appendLine(
+            "[Agent] Provider returned fallback prompt; invoking fallbackProvider"
+          );
+          const apiContent = await this.fallbackProvider.generateReview(
+            files,
+            oldHash,
+            newHash
+          );
+          if (apiContent && apiContent.trim().length > 0) {
+            reviewContent = apiContent;
+          }
+        } catch (e) {
+          this.outputChannel.appendLine(
+            "[Agent] fallbackProvider failed: " +
+              (e instanceof Error ? e.message : String(e))
+          );
+        }
       }
 
       // Write review file
@@ -72,11 +150,38 @@ export class Agent {
       this.outputChannel.appendLine(
         "[Agent] Review file generated successfully"
       );
+
+      // Notify the user that the review has been generated and offer to open it
+      try {
+        const action = await this.notifier!.showInformationMessage(
+          "Code review generated",
+          "Open review"
+        );
+        if (action === "Open review") {
+          await this.notifier!.executeCommand(
+            "continuous-ai-reviewer.openReview"
+          );
+        }
+      } catch (e) {
+        // Ignore notification failures but log
+        this.outputChannel.appendLine(
+          "[Agent] Notification failed: " +
+            (e instanceof Error ? e.message : String(e))
+        );
+      }
     } catch (error) {
       if (error instanceof Error) {
         this.outputChannel.appendLine(
           "[Agent] Error processing changes: " + error.message
         );
+        // Also notify the user of the failure
+        try {
+          this.notifier!.showErrorMessage(
+            "Failed to generate code review: " + error.message
+          );
+        } catch (e) {
+          // ignore
+        }
       }
     }
   }
@@ -87,31 +192,38 @@ export class Agent {
    * This is a placeholder that creates a basic markdown structure.
    * Future: Replace with actual AI review generation.
    */
-  private generateReviewContent(
+  private async generateReviewContent(
     files: string[],
     oldHash: string,
     newHash: string
-  ): string {
+  ): Promise<string> {
+    // If a Copilot provider is present, try to use it first. This allows the
+    // local fallback path to still leverage the Copilot extension when
+    // available even if the primary provider call failed earlier.
+    if (this.provider) {
+      try {
+        const fromProvider = await this.provider.generateReview(
+          files,
+          oldHash,
+          newHash
+        );
+        if (fromProvider && fromProvider.trim().length > 0) {
+          return fromProvider;
+        }
+      } catch (e) {
+        this.outputChannel.appendLine(
+          "[Agent] generateReviewContent: provider.generateReview failed: " +
+            (e instanceof Error ? e.message : String(e))
+        );
+      }
+    }
+
+    // Otherwise, fall back to the existing local stub that writes a simple
+    // markdown review with timestamp and file list.
     const timestamp = new Date().toISOString();
     const fileList = files.map((f) => `- ${f}`).join("\n");
 
-    return `# Code Review
-
-**Generated**: ${timestamp}
-
-**Commit Range**: \`${oldHash}\` → \`${newHash}\`
-
-## Changed Files (${files.length})
-
-${fileList}
-
-## Review
-
-This is an automated review stub. Future versions will include AI-generated analysis via Copilot Agent integration.
-
----
-*Generated by Continuous AI Reviewer*
-`;
+    return `# Code Review\n\n**Generated**: ${timestamp}\n\n**Commit Range**: \`${oldHash}\` → \`${newHash}\`\n\n## Changed Files (${files.length})\n\n${fileList}\n\n## Review\n\nThis is an automated review stub. Future versions will include AI-generated analysis via Copilot Agent integration.\n\n---\n*Generated by Continuous AI Reviewer*\n`;
   }
 
   /**

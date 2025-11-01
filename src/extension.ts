@@ -9,7 +9,9 @@ import { tryCreateCopilotProvider } from "./providers/copilotExtensionProvider";
  * This method is called when your extension is activated.
  * Activation occurs on VS Code startup (onStartupFinished event).
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(
+  context: vscode.ExtensionContext
+): Promise<void> {
   const outputChannel = vscode.window.createOutputChannel(
     "Continuous AI Reviewer"
   );
@@ -30,8 +32,53 @@ export function activate(context: vscode.ExtensionContext): void {
   outputChannel.appendLine("Using workspace: " + workspaceRoot);
 
   // Create Agent and GitWatcher instances
-  const provider = tryCreateCopilotProvider(workspaceRoot, outputChannel);
-  const agent = new Agent(workspaceRoot, outputChannel, provider);
+  // Try to detect/activate a Copilot provider (async)
+  let provider = undefined;
+  try {
+    provider = await tryCreateCopilotProvider(workspaceRoot, outputChannel);
+  } catch (e) {
+    outputChannel.appendLine(
+      "[Extension] Error while creating Copilot provider: " +
+        (e instanceof Error ? e.message : String(e))
+    );
+  }
+
+  // Try to create an API provider from env (OPENAI_API_KEY) as fallback
+  let apiProvider = undefined;
+  try {
+    // Lazy import to avoid requiring network libs at top-level
+    const { tryCreateApiProviderFromEnv } = await import(
+      "./providers/apiProvider.js"
+    );
+    apiProvider = tryCreateApiProviderFromEnv();
+  } catch (e) {
+    outputChannel.appendLine(
+      "[Extension] Error while creating API provider: " +
+        (e instanceof Error ? e.message : String(e))
+    );
+  }
+
+  if (provider) {
+    vscode.window.showInformationMessage(
+      "Copilot extension detected and will be used for reviews"
+    );
+  } else if (apiProvider) {
+    vscode.window.showInformationMessage(
+      "No Copilot extension found — using API provider for reviews"
+    );
+  } else {
+    vscode.window.showInformationMessage(
+      "Copilot extension not available — using local review generator"
+    );
+  }
+
+  const agent = new Agent(
+    workspaceRoot,
+    outputChannel,
+    provider,
+    undefined,
+    apiProvider
+  );
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
   // Register command to open the generated review file from the Command Palette

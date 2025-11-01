@@ -137,10 +137,10 @@ export class CopilotExtensionProvider implements IReviewProvider {
  * Create a CopilotExtensionProvider synchronously — it will detect extension
  * presence. Returns undefined if no Copilot extension is installed.
  */
-export function tryCreateCopilotProvider(
+export async function tryCreateCopilotProvider(
   workspaceRoot: string,
   output: vscode.OutputChannel
-): CopilotExtensionProvider | undefined {
+): Promise<CopilotExtensionProvider | undefined> {
   const ext =
     vscode.extensions.getExtension("GitHub.copilot") ||
     vscode.extensions.getExtension("github.copilot") ||
@@ -150,5 +150,25 @@ export function tryCreateCopilotProvider(
     return undefined;
   }
 
+  // Try to activate the extension to ensure programmatic APIs (if any) are available
+  try {
+    await ext.activate();
+    output.appendLine(
+      "[CopilotProvider] Copilot extension activated successfully"
+    );
+  } catch (e) {
+    const msg =
+      (e instanceof Error && e.message) || (e ? String(e) : "Unknown error");
+    output.appendLine(
+      "[CopilotProvider] Failed to activate Copilot extension: " + msg
+    );
+    // Notify the user that activation failed
+    vscode.window.showErrorMessage(
+      "Copilot extension found but activation failed: " + msg
+    );
+    return undefined;
+  }
+
+  // Return provider instance
   return new CopilotExtensionProvider(workspaceRoot, output);
 }

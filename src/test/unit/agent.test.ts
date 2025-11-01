@@ -11,6 +11,18 @@ class DummyOutputChannel {
   }
 }
 
+class DummyNotifier {
+  async showInformationMessage(message: string, ...actions: string[]) {
+    return undefined; // don't open anything during tests
+  }
+  showErrorMessage(message: string) {
+    // no-op
+  }
+  async executeCommand() {
+    return undefined;
+  }
+}
+
 describe("Agent", function () {
   const tmpDir = path.join(os.tmpdir(), `car-agent-test-${Date.now()}`);
   let output: DummyOutputChannel;
@@ -19,7 +31,13 @@ describe("Agent", function () {
   before(function () {
     fs.mkdirSync(tmpDir, { recursive: true });
     output = new DummyOutputChannel();
-    agent = new Agent(tmpDir, output as unknown as any);
+    const notifier = new DummyNotifier();
+    agent = new Agent(
+      tmpDir,
+      output as unknown as any,
+      undefined,
+      notifier as any
+    );
   });
 
   after(function () {
