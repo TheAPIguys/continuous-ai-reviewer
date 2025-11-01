@@ -24,8 +24,28 @@
         "command": "continuous-ai-reviewer.cRV",
         "title": "cRV",
         "category": "Continuous AI Reviewer"
+      },
+      {
+        "command": "continuous-ai-reviewer.selectModel",
+        "title": "Continuous AI Reviewer: Select AI Model",
+        "category": "Continuous AI Reviewer"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Continuous AI Reviewer",
+      "properties": {
+        "continuousAiReviewer.modelVendor": {
+          "type": "string",
+          "default": "copilot",
+          "description": "The AI model vendor to use for code reviews (e.g., 'copilot')"
+        },
+        "continuousAiReviewer.modelFamily": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "The AI model family to use for code reviews. Use the 'Select AI Model' command to choose from available models."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
