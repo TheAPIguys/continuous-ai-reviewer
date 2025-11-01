@@ -122,7 +122,11 @@ export class Agent {
       if (
         this.fallbackProvider &&
         typeof reviewContent === "string" &&
-        reviewContent.startsWith("# Copilot (fallback) Review")
+        // Accept a few Copilot fallback variants. Some providers return
+        // "# Copilot (fallback) Review" while others used to return
+        // variants like "# Copilot Review (sent to Copilot UI)". Match
+        // either form so the fallback provider gets invoked reliably.
+        /^# Copilot.*Review/.test(reviewContent)
       ) {
         try {
           this.outputChannel.appendLine(

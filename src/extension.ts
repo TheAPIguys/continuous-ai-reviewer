@@ -50,7 +50,7 @@ export async function activate(
     const { tryCreateApiProviderFromEnv } = await import(
       "./providers/apiProvider.js"
     );
-    apiProvider = tryCreateApiProviderFromEnv();
+    apiProvider = tryCreateApiProviderFromEnv(workspaceRoot, outputChannel);
   } catch (e) {
     outputChannel.appendLine(
       "[Extension] Error while creating API provider: " +

@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import * as cp from "child_process";
 import { promisify } from "util";
-// path not used here (kept minimal); remove unused import
 import { IReviewProvider } from "./IReviewProvider";
 
 const exec = promisify(cp.exec);
@@ -116,6 +115,76 @@ export class CopilotExtensionProvider implements IReviewProvider {
               "[CopilotProvider] api.request('generateReview') failed"
             );
           }
+        }
+        // If the extension didn't provide a programmatic string response,
+        // try invoking known Copilot/Chat commands in VS Code. Some Copilot
+        // extensions expose chat commands which accept an initial prompt.
+        try {
+          const allCommands = await vscode.commands.getCommands(true);
+          const candidateCommands = [
+            "github.copilot.chat.open",
+            "github.copilot.chat.create",
+            "github.copilot.chat.start",
+            "github.copilot.chat.send",
+            "github.copilot.openChat",
+            "copilot.chat.open",
+            "copilot.openChat",
+          ];
+
+          for (const cmd of candidateCommands) {
+            if (allCommands.includes(cmd)) {
+              this.output.appendLine(
+                `[CopilotProvider] Executing Copilot command: ${cmd}`
+              );
+              try {
+                // Many commands accept either a string prompt or an object
+                // containing { prompt }. Try both forms defensively.
+                const tryArgs = [prompt, { prompt }];
+                for (const arg of tryArgs) {
+                  try {
+                    // executeCommand may open the UI and return undefined.
+                    const res = await vscode.commands.executeCommand(cmd, arg);
+                    if (typeof res === "string" && res.trim().length > 0) {
+                      this.output.appendLine(
+                        `[CopilotProvider] Command ${cmd} returned a response`
+                      );
+                      return res as string;
+                    }
+                  } catch (e) {
+                    // If a particular arg form fails, keep trying other forms
+                    this.output.appendLine(
+                      `[CopilotProvider] Command ${cmd} with arg form threw: ${
+                        e instanceof Error ? e.message : String(e)
+                      }`
+                    );
+                  }
+                }
+
+                // If we get here, the command was executed but did not return
+                // a textual response (likely it opened the Copilot UI). Treat
+                // that as a success for interactive workflows and return a
+                // short confirmation string so callers get something usable.
+                this.output.appendLine(
+                  `[CopilotProvider] Invoked ${cmd}; opened Copilot UI with prompt.`
+                );
+                // Use the same fallback marker as the original fallback so
+                // the Agent can detect and forward the prompt to the API
+                // fallback provider when configured.
+                return `# Copilot (fallback) Review\n\n${prompt}`;
+              } catch (e) {
+                this.output.appendLine(
+                  `[CopilotProvider] Failed to execute command ${cmd}: ${
+                    e instanceof Error ? e.message : String(e)
+                  }`
+                );
+              }
+            }
+          }
+        } catch (e) {
+          this.output.appendLine(
+            "[CopilotProvider] Error while searching/executing Copilot commands: " +
+              (e instanceof Error ? e.message : String(e))
+          );
         }
       } catch (e) {
         this.output.appendLine(

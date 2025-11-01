@@ -66,9 +66,8 @@ pnpm run package
 ### Agent (`src/agent.ts`)
 
 - Current: Local stub writing `review/review.md` with timestamp and file list
-- Future: Network integration with Copilot Agent endpoints
-- Must handle credentials via VS Code SecretStorage (never plaintext)
-- Should implement retry/backoff for network failures
+- Create a chat with Copilot Agent endpoint in future. Request the review and write to `review/review.md`
+- Create a command pallette command manual to allow the user to selected default AI model to use with the Agent.
 
 ### Extension Lifecycle Pattern
 
