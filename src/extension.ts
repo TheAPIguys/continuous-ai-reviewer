@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
+import { tryCreateCopilotProvider } from "./providers/copilotExtensionProvider";
 
 /**
  * This method is called when your extension is activated.
@@ -29,7 +30,8 @@ export function activate(context: vscode.ExtensionContext): void {
   outputChannel.appendLine("Using workspace: " + workspaceRoot);
 
   // Create Agent and GitWatcher instances
-  const agent = new Agent(workspaceRoot, outputChannel);
+  const provider = tryCreateCopilotProvider(workspaceRoot, outputChannel);
+  const agent = new Agent(workspaceRoot, outputChannel, provider);
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
   // Register command to open the generated review file from the Command Palette

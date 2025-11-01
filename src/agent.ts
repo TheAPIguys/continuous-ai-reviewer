@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import { IReviewProvider } from "./providers/IReviewProvider";
 
 /**
  * Agent handles the processing of changed files and generation of review files.
@@ -13,10 +14,16 @@ import * as path from "path";
 export class Agent {
   private outputChannel: vscode.OutputChannel;
   private workspaceRoot: string;
+  private provider?: IReviewProvider;
 
-  constructor(workspaceRoot: string, outputChannel: vscode.OutputChannel) {
+  constructor(
+    workspaceRoot: string,
+    outputChannel: vscode.OutputChannel,
+    provider?: IReviewProvider
+  ) {
     this.workspaceRoot = workspaceRoot;
     this.outputChannel = outputChannel;
+    this.provider = provider;
   }
 
   /**
@@ -39,8 +46,25 @@ export class Agent {
           newHash
       );
 
-      // Generate review content
-      const reviewContent = this.generateReviewContent(files, oldHash, newHash);
+      // Generate review content — prefer pluggable provider if available
+      let reviewContent: string;
+      if (this.provider) {
+        try {
+          reviewContent = await this.provider.generateReview(
+            files,
+            oldHash,
+            newHash
+          );
+        } catch (err) {
+          this.outputChannel.appendLine(
+            "[Agent] Provider failed, falling back to local generator: " +
+              (err instanceof Error ? err.message : String(err))
+          );
+          reviewContent = this.generateReviewContent(files, oldHash, newHash);
+        }
+      } else {
+        reviewContent = this.generateReviewContent(files, oldHash, newHash);
+      }
 
       // Write review file
       await this.writeReviewFile(reviewContent);
