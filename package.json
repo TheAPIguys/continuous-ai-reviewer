@@ -20,7 +20,7 @@
     "continuous-integration"
   ],
   "engines": {
-    "vscode": "^1.70.0"
+    "vscode": "^1.105.0"
   },
   "categories": [
     "Other",
@@ -110,7 +110,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "~22.18.13",
-    "@types/vscode": "^1.170.0",
+    "@types/vscode": "^1.105.0",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "@vscode/test-cli": "^0.0.11",
