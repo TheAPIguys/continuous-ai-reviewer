@@ -16,14 +16,14 @@
   "tags": [
     "AI",
     "code-review",
-    "gitcopilot",
+    "GitHub Copilot",
     "continuous-integration"
   ],
   "engines": {
-    "vscode": "^1.105.0"
+    "vscode": "^1.70.0"
   },
   "categories": [
-    "AI",
+    "Other",
     "Machine Learning",
     "Linters"
   ],
@@ -80,7 +80,7 @@
         "continuousAiReviewer.modelFamily": {
           "type": "string",
           "default": "gpt-4o",
-          "description": "The AI model family to use for code reviews. Use the 'Select AI Mo del' command to choose from available models."
+          "description": "The AI model family to use for code reviews. Use the 'Select AI Model' command to choose from available models."
         }
       }
     },
