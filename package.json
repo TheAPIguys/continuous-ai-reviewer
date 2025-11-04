@@ -2,7 +2,7 @@
   "name": "continuous-ai-reviewer",
   "displayName": "Continuous AI Reviewer",
   "description": "Continuous AI reviewer with GitHub Copilot AI workflow",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "TheApiGuys",
   "license": "MIT",
   "repository": {
@@ -23,7 +23,9 @@
     "vscode": "^1.105.0"
   },
   "categories": [
-    "Other"
+    "AI",
+    "Machine Learning",
+    "Linters"
   ],
   "activationEvents": [
     "onStartupFinished"
