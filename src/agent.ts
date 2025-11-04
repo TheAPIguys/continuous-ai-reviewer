@@ -678,30 +678,26 @@ Respond only with valid JSON, no additional text or markdown formatting.`;
    * Write the review content to extension global storage directory
    */
   private async writeReviewFile(content: string): Promise<void> {
-    if (!this.extensionContext) {
-      this.outputChannel.appendLine(
-        "[Agent] Error: No extension context available, cannot write review"
-      );
-      return;
+    let reviewDir: string;
+
+    // Prefer extension's global storage directory if available
+    if (this.extensionContext) {
+      const storageUri = this.extensionContext.globalStorageUri;
+      reviewDir = storageUri.fsPath;
+    } else {
+      // Fall back to workspace root's review subdirectory (for tests and standalone usage)
+      reviewDir = path.join(this.workspaceRoot, "review");
     }
 
-    // Use extension's global storage directory (persists, not in user's project)
-    const storageUri = this.extensionContext.globalStorageUri;
-    const reviewDir = storageUri.fsPath;
-
-    // Create global storage directory if it doesn't exist
+    // Create review directory if it doesn't exist
     if (!fs.existsSync(reviewDir)) {
       fs.mkdirSync(reviewDir, { recursive: true });
-      this.outputChannel.appendLine(
-        "[Agent] Created extension storage directory"
-      );
+      this.outputChannel.appendLine("[Agent] Created review directory");
     }
 
-    // Write review file to extension storage
+    // Write review file
     const reviewFile = path.join(reviewDir, "review.md");
     fs.writeFileSync(reviewFile, content, "utf-8");
-    this.outputChannel.appendLine(
-      "[Agent] Review written to extension storage: " + reviewFile
-    );
+    this.outputChannel.appendLine("[Agent] Review written to: " + reviewFile);
   }
 }
