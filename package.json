@@ -2,7 +2,7 @@
   "name": "continuous-ai-reviewer",
   "displayName": "continuous-ai-reviewer",
   "description": "Continuous ai reviewer with gitcopilot ai workflow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "TheApiGuys",
   "license": "MIT",
   "repository": {
