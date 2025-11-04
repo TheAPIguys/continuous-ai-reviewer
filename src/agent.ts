@@ -16,6 +16,11 @@ export interface Issue {
   comments: string;
   category: string;
   suggestion?: string;
+  // Line tracking for smart decoration positioning
+  lineContent?: string; // The actual content of the line with the issue
+  contextBefore?: string[]; // 2 lines before the issue (for matching)
+  contextAfter?: string[]; // 2 lines after the issue (for matching)
+  reviewCommit?: string; // The commit SHA this review is based on
 }
 
 export interface ReviewResponse {
@@ -36,6 +41,14 @@ export interface Notifier {
 }
 
 /**
+ * Callback for when a review is completed
+ */
+export type ReviewCompletedCallback = (
+  reviewResponse: ReviewResponse,
+  reviewCommit: string
+) => void;
+
+/**
  * Agent handles the processing of changed files and generation of review files.
  *
  * Current implementation: Local stub that writes a review markdown file with
@@ -53,6 +66,7 @@ export class Agent {
   private notifier?: Notifier;
   private extensionContext?: vscode.ExtensionContext;
   private reviewInProgress: boolean = false;
+  private onReviewCompleted?: ReviewCompletedCallback;
 
   constructor(
     workspaceRoot: string,
@@ -94,6 +108,13 @@ export class Agent {
         };
       }
     }
+  }
+
+  /**
+   * Set callback to be invoked when a review is completed
+   */
+  setOnReviewCompleted(callback: ReviewCompletedCallback): void {
+    this.onReviewCompleted = callback;
   }
 
   /**
@@ -285,6 +306,12 @@ export class Agent {
             "Invalid response structure: missing or invalid 'issues' array"
           );
         }
+
+        // Add reviewCommit to each issue
+        reviewResponse.issues.forEach((issue) => {
+          issue.reviewCommit = newHash;
+        });
+
         console.log(reviewResponse);
 
         this.outputChannel.appendLine(
@@ -317,6 +344,11 @@ export class Agent {
         this.outputChannel.appendLine(
           "[Agent] Stored review data in extension context"
         );
+      }
+
+      // Notify DecorationManager if callback is set
+      if (this.onReviewCompleted) {
+        this.onReviewCompleted(reviewResponse, newHash);
       }
 
       // Generate markdown from the parsed issues
@@ -453,6 +485,7 @@ Please respond with a JSON object containing an array of issues found in the cod
       "severity": "low" | "medium" | "high",
       "filename": "<relative path to file>",
       "line": <line number if applicable, otherwise omit>,
+      "lineContent": "<the exact content of the line with the issue (for tracking)>",
       "title": "<brief title of the issue>",
       "comments": "<detailed explanation of the issue>",
       "category": "<one of: code-quality, security, performance, bug, style, documentation, testing>",
@@ -465,6 +498,7 @@ Guidelines:
 - Be critical but constructive
 - Focus on real issues, not nitpicks
 - Include line numbers when possible
+- **IMPORTANT**: Include the exact line content in "lineContent" field for accurate tracking
 - Cover code quality, security, performance, and potential bugs
 - Only include issues that are relevant to the changes
 - If no issues found, return an empty issues array

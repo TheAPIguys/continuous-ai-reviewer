@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
+import { DecorationManager } from "./decorationManager";
 
 /**
  * This method is called when your extension is activated.
@@ -30,9 +31,22 @@ export async function activate(
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
   outputChannel.appendLine("Using workspace: " + workspaceRoot);
 
+  // Create DecorationManager instance
+  const decorationManager = new DecorationManager(workspaceRoot, outputChannel);
+  context.subscriptions.push(decorationManager);
+
   // Create Agent and GitWatcher instances
   // No longer need provider since we use vscode.lm API directly
   const agent = new Agent(workspaceRoot, outputChannel, undefined, context);
+
+  // Connect agent to decoration manager
+  agent.setOnReviewCompleted((reviewResponse, reviewCommit) => {
+    outputChannel.appendLine(
+      "[Extension] Review completed, updating decorations"
+    );
+    decorationManager.updateReview(reviewResponse, reviewCommit);
+  });
+
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
   // Register command to open the generated review file from the Command Palette
@@ -303,6 +317,17 @@ export async function activate(
     }
   );
 
+  // Register command to clear decorations
+  const clearDecorationsCommand = "continuous-ai-reviewer.clearDecorations";
+  const clearDecorationsDisposable = vscode.commands.registerCommand(
+    clearDecorationsCommand,
+    () => {
+      outputChannel.appendLine("[Extension] Clearing all decorations");
+      decorationManager.clearDecorations();
+      vscode.window.showInformationMessage("Code review decorations cleared");
+    }
+  );
+
   // Register disposables for cleanup
   context.subscriptions.push(
     gitWatcher,
@@ -310,7 +335,8 @@ export async function activate(
     openReviewDisposable,
     cRvDisposable,
     selectModelDisposable,
-    generateReviewNowDisposable
+    generateReviewNowDisposable,
+    clearDecorationsDisposable
   );
 
   outputChannel.appendLine("Git watcher initialized and polling started");
