@@ -1,51 +1,93 @@
-# continuous-ai-reviewer README
+# Continuous AI Reviewer
 
-This is the README for your extension "continuous-ai-reviewer". After writing up a brief description, we recommend including the following sections.
+Automatically monitors your Git repository for new commits and generates AI-powered code reviews using GitHub Copilot. Reviews are displayed as inline decorations in your editor with smart line tracking.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### 🤖 Automatic Code Reviews
+- Watches your Git repository for new commits
+- Generates comprehensive AI reviews using GitHub Copilot's Language Model API
+- Creates structured reviews with issues categorized by severity (high, medium, low)
 
-For example if there is an image subfolder under your extension project workspace:
+### 📍 Smart Inline Decorations
+- Issues appear as colored decorations in your editor:
+  - 🔴 **Red** = High severity
+  - 🟡 **Yellow** = Medium severity  
+  - 🟢 **Green** = Low severity
+- Decorations track code changes intelligently:
+  - **Solid icon** = Exact line match (high confidence)
+  - **Dashed icon** = Approximate match (code may have changed)
 
-\!\[feature X\]\(images/feature-x.png\)
+### ✅ Mark Issues as Fixed
+- Click **"✅ Mark as Fixed"** button in issue hover tooltip
+- Dismissed issues stay hidden across VS Code sessions
+- Run **"Show All Dismissed Issues"** command to restore them
+- Simple, user-controlled workflow - no auto-detection guesswork!
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+### 🎯 Rich Hover Details
+Hover over any decorated line to see:
+- Issue title and severity
+- Detailed explanation
+- Category (e.g., Security, Performance, Best Practices)
+- AI-generated suggestions for fixes
+- Commit SHA this review is based on
+
+### 🔧 Customizable AI Models
+- Select from available GitHub Copilot models
+- Choose between standard and premium models (o1-preview, o1-mini, etc.)
+- Configure via Command Palette: **"Select AI Model"**
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- **GitHub Copilot subscription** (required for AI model access)
+- **Git repository** in your workspace
+- **VS Code 1.105.0+**
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+* `continuousAiReviewer.modelVendor`: The AI model vendor (default: `"copilot"`)
+* `continuousAiReviewer.modelFamily`: The AI model family to use (default: `"gpt-4o"`)
+
+## Commands
+
+Access these from the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`):
+
+- **`cRV`** - Quick alias to open the review file
+- **`Continuous AI Reviewer: Open review file`** - Open `review/review.md`
+- **`Continuous AI Reviewer: Select AI Model`** - Choose which Copilot model to use
+- **`Continuous AI Reviewer: Generate Review Now`** - Manually trigger review for last commit
+- **`Continuous AI Reviewer: Clear Decorations`** - Hide all issue decorations
+- **`Continuous AI Reviewer: Show All Dismissed Issues`** - Restore dismissed issues
+
+## How to Use
+
+1. **Open a Git repository** in VS Code
+2. **Make commits** as you normally would
+3. **Extension automatically generates reviews** for each new commit
+4. **Review issues** shown as inline decorations
+5. **Hover over decorations** to see details and suggestions
+6. **Click "Mark as Fixed"** on issues you've addressed
+7. **Check `review/review.md`** for full review text
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- Extension only monitors the first workspace folder in multi-root workspaces
+- Large diffs (>50KB) are truncated to prevent token overflow
+- Stale issues (where line cannot be found) are hidden from decorations
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+### 0.0.1
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+Initial release:
+- Automatic Git commit monitoring
+- AI-powered code reviews using GitHub Copilot
+- Inline decorations with smart line tracking
+- "Mark as Fixed" feature for dismissing issues
+- Persistent dismissed issue tracking
+- Model selection support
 
 ---
 

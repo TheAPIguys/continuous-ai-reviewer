@@ -39,6 +39,16 @@
         "command": "continuous-ai-reviewer.clearDecorations",
         "title": "Continuous AI Reviewer: Clear Decorations",
         "category": "Continuous AI Reviewer"
+      },
+      {
+        "command": "continuous-ai-reviewer.dismissIssue",
+        "title": "Continuous AI Reviewer: Mark Issue as Fixed",
+        "category": "Continuous AI Reviewer"
+      },
+      {
+        "command": "continuous-ai-reviewer.clearDismissedIssues",
+        "title": "Continuous AI Reviewer: Show All Dismissed Issues",
+        "category": "Continuous AI Reviewer"
       }
     ],
     "configuration": {

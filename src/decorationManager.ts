@@ -36,16 +36,22 @@ export class DecorationManager implements vscode.Disposable {
 
   // Current review data indexed by file path
   private issuesByFile: Map<string, Issue[]> = new Map();
+  // Line-based index for quick lookup: filePath -> lineNumber -> Issue[]
+  private issuesByFileLine: Map<string, Map<number, Issue[]>> = new Map();
   private currentReviewCommit?: string;
 
-  // Hover provider
-  private hoverProvider?: vscode.Disposable;
+  // Track dismissed issues (persisted across sessions)
+  private dismissedIssues: Set<string> = new Set();
 
   constructor(
     private workspaceRoot: string,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    private context: vscode.ExtensionContext
   ) {
     this.outputChannel = outputChannel;
+
+    // Load dismissed issues from storage
+    this.loadDismissedIssues();
 
     // Create decoration types for exact matches
     this.highSeverityDecoration = this.createDecorationType("high", false);
@@ -59,9 +65,6 @@ export class DecorationManager implements vscode.Disposable {
       true
     );
     this.lowSeverityApproxDecoration = this.createDecorationType("low", true);
-
-    // Register hover provider
-    this.registerHoverProvider();
 
     // Listen to editor changes
     this.disposables.push(
@@ -128,22 +131,26 @@ export class DecorationManager implements vscode.Disposable {
   }
 
   /**
-   * Create SVG icon for exact match
+   * Create SVG icon for exact match (Lucide-style alert-circle)
    */
   private createIcon(color: string): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-      <circle cx="8" cy="8" r="6" fill="${color}" stroke="white" stroke-width="1"/>
-      <text x="8" y="11" text-anchor="middle" fill="white" font-size="10" font-weight="bold">!</text>
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10" fill="${color}" opacity="0.2"/>
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <circle cx="12" cy="16" r="0.5" fill="${color}"/>
     </svg>`;
   }
 
   /**
-   * Create SVG icon for approximate match (with warning indicator)
+   * Create SVG icon for approximate match (Lucide-style alert-triangle)
    */
   private createApproximateIcon(color: string): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-      <circle cx="8" cy="8" r="6" fill="${color}" stroke="white" stroke-width="1" stroke-dasharray="2,1"/>
-      <text x="8" y="11" text-anchor="middle" fill="white" font-size="10" font-weight="bold">?</text>
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" fill="${color}" opacity="0.2"/>
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/>
+      <circle cx="12" cy="17" r="0.5" fill="${color}"/>
     </svg>`;
   }
 
@@ -155,11 +162,12 @@ export class DecorationManager implements vscode.Disposable {
       `[DecorationManager] Updating review with ${reviewResponse.issues.length} issues`
     );
 
-    // Clear existing decorations
+    // Clear existing decorations and indexes
     this.clearDecorations();
 
     // Index issues by file
     this.issuesByFile.clear();
+    this.issuesByFileLine.clear();
     this.currentReviewCommit = reviewCommit;
 
     for (const issue of reviewResponse.issues) {
@@ -169,10 +177,23 @@ export class DecorationManager implements vscode.Disposable {
       }
 
       const filePath = path.join(this.workspaceRoot, issue.filename);
+
+      // Index by file
       if (!this.issuesByFile.has(filePath)) {
         this.issuesByFile.set(filePath, []);
       }
       this.issuesByFile.get(filePath)!.push(issue);
+
+      // Index by file and line for quick lookup
+      if (!this.issuesByFileLine.has(filePath)) {
+        this.issuesByFileLine.set(filePath, new Map());
+      }
+      const lineMap = this.issuesByFileLine.get(filePath)!;
+      const lineNumber = issue.line || 0;
+      if (!lineMap.has(lineNumber)) {
+        lineMap.set(lineNumber, []);
+      }
+      lineMap.get(lineNumber)!.push(issue);
     }
 
     this.outputChannel.appendLine(
@@ -210,13 +231,18 @@ export class DecorationManager implements vscode.Disposable {
     const issues = this.issuesByFile.get(filePath);
 
     if (!issues || issues.length === 0) {
+      this.outputChannel.appendLine(
+        `[DecorationManager] No issues found for ${path.basename(filePath)}`
+      );
       return;
     }
 
     this.outputChannel.appendLine(
       `[DecorationManager] Applying decorations to ${path.basename(
         filePath
-      )} (${issues.length} issues)`
+      )} (${issues.length} issues, ${
+        this.dismissedIssues.size
+      } dismissed total)`
     );
 
     // Group decorations by severity and confidence
@@ -230,6 +256,16 @@ export class DecorationManager implements vscode.Disposable {
     const fileContent = editor.document.getText();
 
     for (const issue of issues) {
+      // Skip dismissed issues
+      if (this.isIssueDismissed(issue)) {
+        this.outputChannel.appendLine(
+          `[DecorationManager] Skipping dismissed issue: ${this.getIssueKey(
+            issue
+          )}`
+        );
+        continue;
+      }
+
       const location = this.findCurrentLine(issue, fileContent);
 
       if (
@@ -238,6 +274,13 @@ export class DecorationManager implements vscode.Disposable {
         location.confidence === "stale"
       ) {
         // Skip stale issues for now
+        this.outputChannel.appendLine(
+          `[DecorationManager] Skipping stale/unfound issue: ${
+            issue.title
+          } (line ${issue.line}, confidence: ${
+            location?.confidence || "not found"
+          })`
+        );
         continue;
       }
 
@@ -362,6 +405,13 @@ export class DecorationManager implements vscode.Disposable {
     md.supportHtml = true;
     md.isTrusted = true;
 
+    // Add "Mark as Fixed" button command link
+    const dismissCommand = encodeURI(
+      `command:continuous-ai-reviewer.dismissIssue?${JSON.stringify([
+        this.getIssueKey(issue),
+      ])}`
+    );
+
     // Add confidence warning for approximate matches
     if (confidence === "approximate") {
       md.appendMarkdown(
@@ -377,7 +427,10 @@ export class DecorationManager implements vscode.Disposable {
         ? "🟡"
         : "🟢";
 
-    md.appendMarkdown(`${severityEmoji} **${issue.title}**\n\n`);
+    // Title with "Mark as Fixed" button on the right
+    md.appendMarkdown(
+      `${severityEmoji} **${issue.title}** &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [✅ Mark as Fixed](${dismissCommand} "Dismiss this issue")\n\n`
+    );
     md.appendMarkdown(`**Severity**: ${issue.severity}\n\n`);
     md.appendMarkdown(`**Category**: ${issue.category}\n\n`);
     md.appendMarkdown(`---\n\n`);
@@ -400,39 +453,76 @@ export class DecorationManager implements vscode.Disposable {
   }
 
   /**
-   * Register hover provider for additional issue details
+   * Generate a unique key for an issue
    */
-  private registerHoverProvider(): void {
-    this.hoverProvider = vscode.languages.registerHoverProvider(
-      { scheme: "file" },
-      {
-        provideHover: (document, position, token) => {
-          const filePath = document.uri.fsPath;
-          const issues = this.issuesByFile.get(filePath);
+  private getIssueKey(issue: Issue): string {
+    return `${issue.filename}:${issue.id}:${issue.title}`;
+  }
 
-          if (!issues) {
-            return null;
-          }
+  /**
+   * Check if an issue has been dismissed
+   */
+  private isIssueDismissed(issue: Issue): boolean {
+    return this.dismissedIssues.has(this.getIssueKey(issue));
+  }
 
-          const lineNumber = position.line + 1; // Convert to 1-based
+  /**
+   * Dismiss (mark as fixed) an issue
+   */
+  dismissIssue(issueKey: string): void {
+    this.dismissedIssues.add(issueKey);
+    this.saveDismissedIssues();
 
-          // Find issues on this line
-          const fileContent = document.getText();
-          for (const issue of issues) {
-            const location = this.findCurrentLine(issue, fileContent);
-            if (location && location.currentLine === lineNumber) {
-              return new vscode.Hover(
-                this.createHoverMessage(issue, location.confidence)
-              );
-            }
-          }
-
-          return null;
-        },
-      }
+    this.outputChannel.appendLine(
+      `[DecorationManager] Dismissed issue: ${issueKey}`
     );
 
-    this.disposables.push(this.hoverProvider);
+    // Refresh decorations
+    vscode.window.visibleTextEditors.forEach((editor) => {
+      this.applyDecorationsToEditor(editor);
+    });
+  }
+
+  /**
+   * Clear all dismissed issues (show them again)
+   */
+  clearDismissedIssues(): void {
+    this.dismissedIssues.clear();
+    this.saveDismissedIssues();
+
+    this.outputChannel.appendLine(
+      "[DecorationManager] Cleared all dismissed issues"
+    );
+
+    // Refresh decorations
+    vscode.window.visibleTextEditors.forEach((editor) => {
+      this.applyDecorationsToEditor(editor);
+    });
+  }
+
+  /**
+   * Load dismissed issues from persistent storage
+   */
+  private loadDismissedIssues(): void {
+    const stored = this.context.globalState.get<string[]>(
+      "dismissedIssues",
+      []
+    );
+    this.dismissedIssues = new Set(stored);
+
+    this.outputChannel.appendLine(
+      `[DecorationManager] Loaded ${this.dismissedIssues.size} dismissed issues`
+    );
+  }
+
+  /**
+   * Save dismissed issues to persistent storage
+   */
+  private saveDismissedIssues(): void {
+    this.context.globalState.update(
+      "dismissedIssues",
+      Array.from(this.dismissedIssues)
+    );
   }
 
   /**

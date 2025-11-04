@@ -4,6 +4,7 @@ import * as path from "path";
 import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
 import { DecorationManager } from "./decorationManager";
+import { DiagnosticManager } from "./diagnosticManager";
 
 /**
  * This method is called when your extension is activated.
@@ -32,19 +33,31 @@ export async function activate(
   outputChannel.appendLine("Using workspace: " + workspaceRoot);
 
   // Create DecorationManager instance
-  const decorationManager = new DecorationManager(workspaceRoot, outputChannel);
+  const decorationManager = new DecorationManager(
+    workspaceRoot,
+    outputChannel,
+    context
+  );
   context.subscriptions.push(decorationManager);
+
+  // Create DiagnosticManager instance
+  const diagnosticManager = new DiagnosticManager(workspaceRoot, outputChannel);
+  context.subscriptions.push(diagnosticManager);
+
+  // Connect the two managers for bi-directional syncing
+  diagnosticManager.setDecorationManager(decorationManager);
 
   // Create Agent and GitWatcher instances
   // No longer need provider since we use vscode.lm API directly
   const agent = new Agent(workspaceRoot, outputChannel, undefined, context);
 
-  // Connect agent to decoration manager
+  // Connect agent to decoration and diagnostic managers
   agent.setOnReviewCompleted((reviewResponse, reviewCommit) => {
     outputChannel.appendLine(
-      "[Extension] Review completed, updating decorations"
+      "[Extension] Review completed, updating decorations and diagnostics"
     );
     decorationManager.updateReview(reviewResponse, reviewCommit);
+    diagnosticManager.updateDiagnostics(reviewResponse);
   });
 
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
@@ -328,6 +341,42 @@ export async function activate(
     }
   );
 
+  // Register command to dismiss an issue (mark as fixed)
+  const dismissIssueCommand = "continuous-ai-reviewer.dismissIssue";
+  const dismissIssueDisposable = vscode.commands.registerCommand(
+    dismissIssueCommand,
+    (issueKey: string) => {
+      outputChannel.appendLine(`[Extension] Dismissing issue: ${issueKey}`);
+      decorationManager.dismissIssue(issueKey);
+
+      // Also dismiss from diagnostics
+      // Parse the key format: "filename:id:title"
+      const parts = issueKey.split(":");
+      if (parts.length >= 2) {
+        const filename = parts[0];
+        const issueId = parseInt(parts[1], 10);
+        diagnosticManager.dismissIssue(filename, issueId);
+      }
+
+      vscode.window.showInformationMessage("Issue marked as fixed ✅");
+    }
+  );
+
+  // Register command to clear all dismissed issues (show them again)
+  const clearDismissedIssuesCommand =
+    "continuous-ai-reviewer.clearDismissedIssues";
+  const clearDismissedIssuesDisposable = vscode.commands.registerCommand(
+    clearDismissedIssuesCommand,
+    () => {
+      outputChannel.appendLine("[Extension] Clearing all dismissed issues");
+      decorationManager.clearDismissedIssues();
+      diagnosticManager.clearDismissedIssues();
+      vscode.window.showInformationMessage(
+        "All dismissed issues are now visible again"
+      );
+    }
+  );
+
   // Register disposables for cleanup
   context.subscriptions.push(
     gitWatcher,
@@ -336,7 +385,9 @@ export async function activate(
     cRvDisposable,
     selectModelDisposable,
     generateReviewNowDisposable,
-    clearDecorationsDisposable
+    clearDecorationsDisposable,
+    dismissIssueDisposable,
+    clearDismissedIssuesDisposable
   );
 
   outputChannel.appendLine("Git watcher initialized and polling started");
