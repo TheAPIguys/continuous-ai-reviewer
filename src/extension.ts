@@ -5,6 +5,7 @@ import { Agent } from "./agent";
 import { GitWatcher } from "./gitWatcher";
 import { DecorationManager } from "./decorationManager";
 import { DiagnosticManager } from "./diagnosticManager";
+import { StatusBarManager } from "./statusBarManager";
 
 /**
  * This method is called when your extension is activated.
@@ -47,6 +48,10 @@ export async function activate(
   // Connect the two managers for bi-directional syncing
   diagnosticManager.setDecorationManager(decorationManager);
 
+  // Create StatusBarManager instance
+  const statusBarManager = new StatusBarManager(outputChannel);
+  context.subscriptions.push(statusBarManager);
+
   // Create Agent and GitWatcher instances
   // No longer need provider since we use vscode.lm API directly
   const agent = new Agent(workspaceRoot, outputChannel, undefined, context);
@@ -58,6 +63,15 @@ export async function activate(
     );
     decorationManager.updateReview(reviewResponse, reviewCommit);
     diagnosticManager.updateDiagnostics(reviewResponse);
+
+    // Update status bar with result
+    statusBarManager.showReviewComplete(reviewResponse.issues.length);
+  });
+
+  // Connect agent to status bar for progress indication
+  agent.setOnReviewStarted(() => {
+    outputChannel.appendLine("[Extension] Review started");
+    statusBarManager.showReviewInProgress();
   });
 
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
@@ -67,7 +81,11 @@ export async function activate(
   const openReviewDisposable = vscode.commands.registerCommand(
     openReviewCommand,
     async () => {
-      const reviewFile = path.join(workspaceRoot, "review", "review.md");
+      // Read from extension's global storage directory instead of project directory
+      const reviewFile = path.join(
+        context.globalStorageUri.fsPath,
+        "review.md"
+      );
       if (!fs.existsSync(reviewFile)) {
         vscode.window.showInformationMessage(
           "No review file found. Generate a review first."
@@ -315,11 +333,17 @@ export async function activate(
           return;
         }
 
+        // Show progress in status bar
+        statusBarManager.showReviewInProgress();
+
         // Call agent to process changes
-        vscode.window.showInformationMessage(
-          "Generating code review... Check the output channel for progress."
-        );
-        await agent.processChanges(files, previous, current);
+        try {
+          await agent.processChanges(files, previous, current);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          statusBarManager.showReviewError(errorMsg);
+          throw err;
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         outputChannel.appendLine(`[Extension] Error: ${errorMsg}`);

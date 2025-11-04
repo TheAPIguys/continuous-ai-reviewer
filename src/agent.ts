@@ -49,6 +49,11 @@ export type ReviewCompletedCallback = (
 ) => void;
 
 /**
+ * Callback for when review processing starts
+ */
+export type ReviewStartedCallback = () => void;
+
+/**
  * Agent handles the processing of changed files and generation of review files.
  *
  * Current implementation: Local stub that writes a review markdown file with
@@ -67,6 +72,7 @@ export class Agent {
   private extensionContext?: vscode.ExtensionContext;
   private reviewInProgress: boolean = false;
   private onReviewCompleted?: ReviewCompletedCallback;
+  private onReviewStarted?: ReviewStartedCallback;
 
   constructor(
     workspaceRoot: string,
@@ -118,6 +124,13 @@ export class Agent {
   }
 
   /**
+   * Set callback to be invoked when review processing starts
+   */
+  setOnReviewStarted(callback: ReviewStartedCallback): void {
+    this.onReviewStarted = callback;
+  }
+
+  /**
    * Process changed files and generate a review.
    *
    * @param files List of changed file paths
@@ -145,6 +158,10 @@ export class Agent {
         );
         return;
       }
+
+      // Notify that review is starting
+      this.onReviewStarted?.();
+
       // Generate review content using the new Language Model API
       // We no longer use the provider pattern since vscode.lm is the official API
       const reviewContent = await this.generateReviewContent(
@@ -248,12 +265,28 @@ export class Agent {
       // Get git diff for the commit range
       const diffContent = await this.getGitDiff(oldHash, newHash);
 
+      // Gather full file contents for small files (< 500 lines)
+      const fileContents = new Map<
+        string,
+        { content: string; lineCount: number }
+      >();
+      for (const file of files) {
+        const content = await this.getFileContent(file);
+        if (content) {
+          fileContents.set(file, content);
+          this.outputChannel.appendLine(
+            `[Agent] Included full content for ${file} (${content.lineCount} lines)`
+          );
+        }
+      }
+
       // Build the prompt for the language model
       const prompt = this.buildReviewPrompt(
         files,
         oldHash,
         newHash,
-        diffContent
+        diffContent,
+        fileContents
       );
 
       // Create chat messages
@@ -420,7 +453,42 @@ export class Agent {
   }
 
   /**
-   * Get git diff for the commit range.
+   * Get full file content for a given file path.
+   * Returns the content if file exists and is < 500 lines, otherwise returns null.
+   */
+  private async getFileContent(
+    filePath: string
+  ): Promise<{ content: string; lineCount: number } | null> {
+    try {
+      const fullPath = path.join(this.workspaceRoot, filePath);
+
+      // Check if file exists
+      if (!fs.existsSync(fullPath)) {
+        return null;
+      }
+
+      // Read file content
+      const content = fs.readFileSync(fullPath, "utf-8");
+      const lineCount = content.split("\n").length;
+
+      // Only return content if file is less than 500 lines
+      if (lineCount < 500) {
+        return { content, lineCount };
+      }
+
+      return null;
+    } catch (error) {
+      this.outputChannel.appendLine(
+        `[Agent] Failed to read file ${filePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get git diff for the commit range with expanded context (15 lines instead of 3).
    */
   private async getGitDiff(oldHash: string, newHash: string): Promise<string> {
     try {
@@ -428,11 +496,12 @@ export class Agent {
       const { promisify } = require("util");
       const exec = promisify(cp.exec);
 
-      const cmd = `git diff ${oldHash} ${newHash}`;
+      // Use -U15 to include 15 lines of context around changes (instead of default 3)
+      const cmd = `git diff -U15 ${oldHash} ${newHash}`;
       const { stdout } = await exec(cmd, { cwd: this.workspaceRoot });
 
       this.outputChannel.appendLine(
-        `[Agent] Retrieved git diff (${stdout.length} bytes)`
+        `[Agent] Retrieved git diff with expanded context (${stdout.length} bytes)`
       );
 
       return stdout;
@@ -446,13 +515,14 @@ export class Agent {
   }
 
   /**
-   * Build a structured prompt for the language model.
+   * Build a structured prompt for the language model with full file contents and diff.
    */
   private buildReviewPrompt(
     files: string[],
     oldHash: string,
     newHash: string,
-    diffContent: string
+    diffContent: string,
+    fileContents?: Map<string, { content: string; lineCount: number }>
   ): string {
     const fileList = files.map((f) => `- ${f}`).join("\n");
 
@@ -464,14 +534,23 @@ export class Agent {
           "\n\n... (diff truncated due to size) ..."
         : diffContent;
 
+    // Build full file contents section for small files
+    let fullFilesSection = "";
+    if (fileContents && fileContents.size > 0) {
+      fullFilesSection = "\n**Full File Contents (for files < 500 lines)**:\n";
+      for (const [filename, { content, lineCount }] of fileContents.entries()) {
+        fullFilesSection += `\n### ${filename} (${lineCount} lines)\n\`\`\`\n${content}\n\`\`\`\n`;
+      }
+    }
+
     return `You are a senior software engineer conducting a code review. Analyze the following commit and provide feedback in JSON format.
 
 **Commit Range**: ${oldHash} → ${newHash}
 
 **Changed Files (${files.length})**:
-${fileList}
+${fileList}${fullFilesSection}
 
-**Git Diff**:
+**Git Diff (with 15 lines of context)**:
 \`\`\`diff
 ${truncatedDiff}
 \`\`\`
@@ -500,7 +579,8 @@ Guidelines:
 - Include line numbers when possible
 - **IMPORTANT**: Include the exact line content in "lineContent" field for accurate tracking
 - Cover code quality, security, performance, and potential bugs
-- Only include issues that are relevant to the changes
+- Consider the full file context when applicable, not just the changes
+- Only include issues that are relevant to the changes or impacted by them
 - If no issues found, return an empty issues array
 
 Respond only with valid JSON, no additional text or markdown formatting.`;
@@ -595,20 +675,33 @@ Respond only with valid JSON, no additional text or markdown formatting.`;
   }
 
   /**
-   * Write the review content to review/review.md
+   * Write the review content to extension global storage directory
    */
   private async writeReviewFile(content: string): Promise<void> {
-    const reviewDir = path.join(this.workspaceRoot, "review");
-    const reviewFile = path.join(reviewDir, "review.md");
-
-    // Create review directory if it doesn't exist
-    if (!fs.existsSync(reviewDir)) {
-      fs.mkdirSync(reviewDir, { recursive: true });
-      this.outputChannel.appendLine("[Agent] Created review directory");
+    if (!this.extensionContext) {
+      this.outputChannel.appendLine(
+        "[Agent] Error: No extension context available, cannot write review"
+      );
+      return;
     }
 
-    // Write review file
+    // Use extension's global storage directory (persists, not in user's project)
+    const storageUri = this.extensionContext.globalStorageUri;
+    const reviewDir = storageUri.fsPath;
+
+    // Create global storage directory if it doesn't exist
+    if (!fs.existsSync(reviewDir)) {
+      fs.mkdirSync(reviewDir, { recursive: true });
+      this.outputChannel.appendLine(
+        "[Agent] Created extension storage directory"
+      );
+    }
+
+    // Write review file to extension storage
+    const reviewFile = path.join(reviewDir, "review.md");
     fs.writeFileSync(reviewFile, content, "utf-8");
-    this.outputChannel.appendLine("[Agent] Review written to: " + reviewFile);
+    this.outputChannel.appendLine(
+      "[Agent] Review written to extension storage: " + reviewFile
+    );
   }
 }
