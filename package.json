@@ -2,7 +2,23 @@
   "name": "continuous-ai-reviewer",
   "displayName": "continuous-ai-reviewer",
   "description": "Continuous ai reviewer with gitcopilot ai workflow",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "publisher": "TheApiGuys",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheAPIguys/continuous-ai-reviewer"
+  },
+  "bugs": {
+    "url": "https://github.com/TheAPIguys/continuous-ai-reviewer/issues"
+  },
+  "homepage": "https://github.com/TheAPIguys/continuous-ai-reviewer",
+  "tags": [
+    "AI",
+    "code-review",
+    "gitcopilot",
+    "continuous-integration"
+  ],
   "engines": {
     "vscode": "^1.105.0"
   },
