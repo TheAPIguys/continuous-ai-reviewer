@@ -2,9 +2,11 @@
 
 Continuous AI Reviewer watches a Git repo and generates AI-powered code reviews using the VS Code Language Model API (Copilot). It surfaces findings as inline decorations, diagnostics (Problems panel), and a generated review file stored in the extension's global storage.
 
-<!-- GIF: add a short demo GIF here (e.g. assets/demo.gif) -->
+## Demo
 
-Summary
+![Continuous AI Reviewer Demo](assets/demo.gif)
+
+## Summary
 -------
 - Automatic code review on new commits (or manual trigger)
 - Inline editor decorations with hover details and quick actions
