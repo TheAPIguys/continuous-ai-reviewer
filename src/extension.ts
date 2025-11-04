@@ -32,7 +32,7 @@ export async function activate(
 
   // Create Agent and GitWatcher instances
   // No longer need provider since we use vscode.lm API directly
-  const agent = new Agent(workspaceRoot, outputChannel, undefined);
+  const agent = new Agent(workspaceRoot, outputChannel, undefined, context);
   const gitWatcher = new GitWatcher(workspaceRoot, agent, outputChannel);
 
   // Register command to open the generated review file from the Command Palette

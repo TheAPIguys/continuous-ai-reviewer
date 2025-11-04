@@ -6,6 +6,22 @@ import { IReviewProvider } from "./providers/IReviewProvider";
 // when running unit tests outside of the VS Code test runner).
 import type * as vscode from "vscode";
 
+// Define the JSON schema for AI responses
+export interface Issue {
+  id: number;
+  severity: "low" | "medium" | "high";
+  filename: string;
+  line?: number;
+  title: string;
+  comments: string;
+  category: string;
+  suggestion?: string;
+}
+
+export interface ReviewResponse {
+  issues: Issue[];
+}
+
 // Notifier is an abstraction over VS Code's messaging/commands so unit tests
 // don't need to require the `vscode` module at load time.
 export interface Notifier {
@@ -35,15 +51,19 @@ export class Agent {
     | { appendLine(line: string): void };
   private workspaceRoot: string;
   private notifier?: Notifier;
+  private extensionContext?: vscode.ExtensionContext;
+  private reviewInProgress: boolean = false;
 
   constructor(
     workspaceRoot: string,
     outputChannel: vscode.OutputChannel | { appendLine(line: string): void },
-    notifier?: Notifier
+    notifier?: Notifier,
+    extensionContext?: vscode.ExtensionContext
   ) {
     this.workspaceRoot = workspaceRoot;
     this.outputChannel = outputChannel;
     this.notifier = notifier;
+    this.extensionContext = extensionContext;
 
     // If no notifier was provided (runtime in VS Code), lazily require vscode
     if (!this.notifier) {
@@ -95,7 +115,15 @@ export class Agent {
           ".." +
           newHash
       );
-
+      if (this.reviewInProgress) {
+        this.outputChannel.appendLine(
+          "[Agent] Review already in progress, skipping new request"
+        );
+        this.notifier?.showInformationMessage(
+          "A code review is already in progress. Please wait for it to complete."
+        );
+        return;
+      }
       // Generate review content using the new Language Model API
       // We no longer use the provider pattern since vscode.lm is the official API
       const reviewContent = await this.generateReviewContent(
@@ -157,6 +185,8 @@ export class Agent {
     newHash: string
   ): Promise<string> {
     // Try to use VS Code Language Model API (vscode.lm)
+
+    this.reviewInProgress = true;
     try {
       // Dynamically import vscode module for runtime access
       const vscodeModule = require("vscode") as typeof import("vscode");
@@ -220,25 +250,88 @@ export class Agent {
       const chatResponse = await model.sendRequest(messages, {}, token);
 
       // Stream and collect the response
-      let reviewContent = "";
+      let rawResponse = "";
       for await (const fragment of chatResponse.text) {
-        reviewContent += fragment;
+        rawResponse += fragment;
       }
 
       cancellationTokenSource.dispose();
 
-      if (reviewContent.trim().length === 0) {
+      if (rawResponse.trim().length === 0) {
         this.outputChannel.appendLine(
           "[Agent] Language model returned empty response, using stub"
         );
         return this.generateStubReview(files, oldHash, newHash);
       }
 
+      // Parse JSON response
+      let reviewResponse: ReviewResponse;
+      try {
+        // Clean the response by removing any markdown code blocks if present
+        let jsonString = rawResponse.trim();
+        if (jsonString.startsWith("```json")) {
+          jsonString = jsonString
+            .replace(/^```json\s*/, "")
+            .replace(/\s*```$/, "");
+        } else if (jsonString.startsWith("```")) {
+          jsonString = jsonString.replace(/^```\s*/, "").replace(/\s*```$/, "");
+        }
+
+        reviewResponse = JSON.parse(jsonString);
+
+        // Validate the response structure
+        if (!reviewResponse.issues || !Array.isArray(reviewResponse.issues)) {
+          throw new Error(
+            "Invalid response structure: missing or invalid 'issues' array"
+          );
+        }
+        console.log(reviewResponse);
+
+        this.outputChannel.appendLine(
+          `[Agent] Successfully parsed ${reviewResponse.issues.length} issues from AI response`
+        );
+      } catch (parseError) {
+        this.outputChannel.appendLine(
+          "[Agent] Failed to parse JSON response: " +
+            (parseError instanceof Error
+              ? parseError.message
+              : String(parseError))
+        );
+        this.outputChannel.appendLine(
+          "[Agent] Raw response: " + rawResponse.substring(0, 500)
+        );
+        return this.generateStubReview(files, oldHash, newHash);
+      }
+
+      // Store the JSON data in extension context
+      if (this.extensionContext) {
+        const commitRange = `${oldHash}..${newHash}`;
+        const storedReviews = this.extensionContext.globalState.get<{
+          [key: string]: ReviewResponse;
+        }>("reviews", {});
+        storedReviews[commitRange] = reviewResponse;
+        await this.extensionContext.globalState.update(
+          "reviews",
+          storedReviews
+        );
+        this.outputChannel.appendLine(
+          "[Agent] Stored review data in extension context"
+        );
+      }
+
+      // Generate markdown from the parsed issues
+      const markdownContent = this.generateMarkdownFromIssues(
+        reviewResponse,
+        files,
+        oldHash,
+        newHash
+      );
+
       this.outputChannel.appendLine(
         "[Agent] Successfully generated review using Language Model API"
       );
 
-      return reviewContent;
+      return markdownContent;
     } catch (error) {
       // Handle Language Model errors
       this.outputChannel.appendLine(
@@ -289,6 +382,8 @@ export class Agent {
         "[Agent] Falling back to stub review due to error"
       );
       return this.generateStubReview(files, oldHash, newHash);
+    } finally {
+      this.reviewInProgress = false;
     }
   }
 
@@ -337,7 +432,7 @@ export class Agent {
           "\n\n... (diff truncated due to size) ..."
         : diffContent;
 
-    return `You are an expert code reviewer. Please provide a comprehensive code review for the following commit.
+    return `You are a senior software engineer conducting a code review. Analyze the following commit and provide feedback in JSON format.
 
 **Commit Range**: ${oldHash} → ${newHash}
 
@@ -349,14 +444,32 @@ ${fileList}
 ${truncatedDiff}
 \`\`\`
 
-Please provide a detailed code review in markdown format with the following sections:
-1. **Summary**: Brief overview of the changes
-2. **Code Quality**: Analysis of code quality, best practices, and potential issues
-3. **Security Concerns**: Any security vulnerabilities or concerns
-4. **Performance Considerations**: Performance implications of the changes
-5. **Suggestions**: Specific recommendations for improvement
+Please respond with a JSON object containing an array of issues found in the code changes. Each issue should have the following structure:
 
-Keep the review professional, constructive, and actionable.`;
+{
+  "issues": [
+    {
+      "id": <unique number starting from 1>,
+      "severity": "low" | "medium" | "high",
+      "filename": "<relative path to file>",
+      "line": <line number if applicable, otherwise omit>,
+      "title": "<brief title of the issue>",
+      "comments": "<detailed explanation of the issue>",
+      "category": "<one of: code-quality, security, performance, bug, style, documentation, testing>",
+      "suggestion": "<optional: specific recommendation for how to fix the issue>"
+    }
+  ]
+}
+
+Guidelines:
+- Be critical but constructive
+- Focus on real issues, not nitpicks
+- Include line numbers when possible
+- Cover code quality, security, performance, and potential bugs
+- Only include issues that are relevant to the changes
+- If no issues found, return an empty issues array
+
+Respond only with valid JSON, no additional text or markdown formatting.`;
   }
 
   /**
@@ -371,6 +484,80 @@ Keep the review professional, constructive, and actionable.`;
     const fileList = files.map((f) => `- ${f}`).join("\n");
 
     return `# Code Review\n\n**Generated**: ${timestamp}\n\n**Commit Range**: \`${oldHash}\` → \`${newHash}\`\n\n## Changed Files (${files.length})\n\n${fileList}\n\n## Review\n\nThis is an automated review stub. The Language Model API was unavailable.\n\nTo enable AI-powered reviews:\n1. Ensure GitHub Copilot extension is installed and activated\n2. Sign in to GitHub Copilot\n3. Grant necessary permissions when prompted\n\n---\n*Generated by Continuous AI Reviewer*\n`;
+  }
+
+  /**
+   * Generate markdown content from parsed issues.
+   */
+  private generateMarkdownFromIssues(
+    reviewResponse: ReviewResponse,
+    files: string[],
+    oldHash: string,
+    newHash: string
+  ): string {
+    const timestamp = new Date().toISOString();
+    const fileList = files.map((f) => `- ${f}`).join("\n");
+    const issues = reviewResponse.issues;
+
+    let markdown = `# Code Review\n\n**Generated**: ${timestamp}\n\n**Commit Range**: \`${oldHash}\` → \`${newHash}\`\n\n## Changed Files (${files.length})\n\n${fileList}\n\n`;
+
+    if (issues.length === 0) {
+      markdown += `## Review\n\n✅ **No issues found.** The code changes look good!\n\n`;
+    } else {
+      markdown += `## Issues Found (${issues.length})\n\n`;
+
+      // Group issues by severity
+      const highSeverity = issues.filter((i) => i.severity === "high");
+      const mediumSeverity = issues.filter((i) => i.severity === "medium");
+      const lowSeverity = issues.filter((i) => i.severity === "low");
+
+      // Sort issues by severity (high first) and then by id
+      const sortedIssues = [...highSeverity, ...mediumSeverity, ...lowSeverity];
+
+      for (const issue of sortedIssues) {
+        const severityEmoji =
+          issue.severity === "high"
+            ? "🔴"
+            : issue.severity === "medium"
+            ? "🟡"
+            : "🟢";
+
+        markdown += `### ${severityEmoji} ${issue.title}\n\n`;
+        markdown += `**File**: \`${issue.filename}\`\n`;
+        if (issue.line) {
+          markdown += `**Line**: ${issue.line}\n`;
+        }
+        markdown += `**Severity**: ${issue.severity}\n`;
+        markdown += `**Category**: ${issue.category}\n\n`;
+        markdown += `${issue.comments}\n\n`;
+        if (issue.suggestion) {
+          markdown += `**Suggestion**: ${issue.suggestion}\n\n`;
+        }
+        markdown += `---\n\n`;
+      }
+
+      // Summary by severity
+      markdown += `## Summary\n\n`;
+      if (highSeverity.length > 0) {
+        markdown += `- 🔴 **High severity**: ${highSeverity.length} issue${
+          highSeverity.length > 1 ? "s" : ""
+        }\n`;
+      }
+      if (mediumSeverity.length > 0) {
+        markdown += `- 🟡 **Medium severity**: ${mediumSeverity.length} issue${
+          mediumSeverity.length > 1 ? "s" : ""
+        }\n`;
+      }
+      if (lowSeverity.length > 0) {
+        markdown += `- 🟢 **Low severity**: ${lowSeverity.length} issue${
+          lowSeverity.length > 1 ? "s" : ""
+        }\n`;
+      }
+      markdown += `\n`;
+    }
+
+    markdown += `---\n*Generated by Continuous AI Reviewer*\n`;
+    return markdown;
   }
 
   /**
